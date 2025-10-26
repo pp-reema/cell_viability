@@ -7,19 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/19yfYsIVJZTiq83jLJ7p5jhY098RM8ADE
 """
 
-!pip install opencv-python-headless scikit-learn scikit-image matplotlib numpy pillow scipy
-
-import cv2
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans, DBSCAN
-from skimage import measure, morphology, filters, segmentation
-from skimage.feature import peak_local_max
-from scipy import ndimage
-from PIL import Image, ImageDraw, ImageFont
-import warnings
-warnings.filterwarnings('ignore')
-
 class CellViabilityAnalyzer:
     """
     Advanced cell viability analyzer optimized for blue-stained microscope images.
@@ -624,52 +611,3 @@ def analyze_image(image_path, method='adaptive'):
     output_class = Image.fromarray(results['classification'])
 
     return results
-
-if __name__ == "__main__":
-    print("""
-    ╔═══════════════════════════════════════════════════════════════╗
-    ║         CELL VIABILITY DETECTION SYSTEM                       ║
-    ║         Optimized for Blue-Stained Microscope Images          ║
-    ╚═══════════════════════════════════════════════════════════════╝
-    """)
-
-    # Import files module for Colab
-    from google.colab import files
-
-    while True:
-        # Step 1: Ask user to upload an image
-        print("\n Please upload your microscope image file:")
-        uploaded = files.upload()
-        image_path = list(uploaded.keys())[0]
-        print(f"✅ Uploaded: {image_path}")
-
-        # Step 2: Analyze
-        print("\n Analyzing image... please wait.")
-        results = analyze_image(image_path, method=method)
-
-        print("\n✅ Analysis completed successfully!")
-
-        # Step 3: Ask if user wants to save/download
-        save_choice = input("Do you want to save and download the result images? (y/n): ").lower()
-        if save_choice == 'y':
-            output_overlay = Image.fromarray(results['overlay'])
-            output_overlay.save('cell_detection_overlay.png')
-
-            output_class = Image.fromarray(results['classification'])
-            output_class.save('cell_classification.png')
-
-            print("\n📁 Results saved:")
-            print("   - cell_detection_overlay.png")
-            print("   - cell_classification.png")
-
-            files.download('cell_detection_overlay.png')
-            files.download('cell_classification.png')
-        else:
-            print("❌ Skipping save...")
-
-        # Step 4: Continue or stop
-        cont = input("\nDo you want to analyze another image? (y/n): ").lower()
-        if cont != 'y':
-            print("\n👋 Exiting the system. Have a great day!")
-            break
-
