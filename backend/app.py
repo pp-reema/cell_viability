@@ -10,15 +10,13 @@ import json
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Note: Analyzer is now initialized per request with custom parameters
-
 @app.route('/', methods=['GET'])
 def home():
     """Health check endpoint"""
     return jsonify({
         'status': 'online',
         'message': 'Cell Viability Analyzer API is running',
-        'version': '1.0.0'
+        'version': '2.0.0'
     })
 
 @app.route('/analyze', methods=['POST'])
@@ -112,50 +110,6 @@ def analyze_image():
         return jsonify({
             'error': str(e),
             'success': False
-        }), 500 image_data.split(',')[1]
-        
-        # Decode base64 image
-        image_bytes = base64.b64decode(image_data)
-        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-        image_np = np.array(image)
-        
-        # Get analysis method (default: adaptive)
-        method = data.get('method', 'adaptive')
-        
-        # Run analysis
-        print(f"Analyzing image of shape: {image_np.shape}")
-        results = analyzer.analyze(image_np, method=method, visualize=False)
-        
-        # Convert numpy arrays to lists for JSON serialization
-        response_data = {
-            'statistics': results['statistics'],
-            'total_cells': len(results['all_cells']),
-            'success': True
-        }
-        
-        # Optionally include overlay and classification images as base64
-        if data.get('include_images', False):
-            # Convert overlay to base64
-            overlay_img = Image.fromarray(results['overlay'])
-            overlay_buffer = io.BytesIO()
-            overlay_img.save(overlay_buffer, format='PNG')
-            overlay_base64 = base64.b64encode(overlay_buffer.getvalue()).decode()
-            response_data['overlay_image'] = f'data:image/png;base64,{overlay_base64}'
-            
-            # Convert classification to base64
-            class_img = Image.fromarray(results['classification'])
-            class_buffer = io.BytesIO()
-            class_img.save(class_buffer, format='PNG')
-            class_base64 = base64.b64encode(class_buffer.getvalue()).decode()
-            response_data['classification_image'] = f'data:image/png;base64,{class_base64}'
-        
-        return jsonify(response_data)
-    
-    except Exception as e:
-        print(f"Error during analysis: {str(e)}")
-        return jsonify({
-            'error': str(e),
-            'success': False
         }), 500
 
 @app.route('/batch-analyze', methods=['POST'])
@@ -169,7 +123,8 @@ def batch_analyze():
             {"id": "1", "image": "data:image/png;base64,..."},
             {"id": "2", "image": "data:image/png;base64,..."}
         ],
-        "method": "adaptive" (optional)
+        "method": "adaptive" (optional),
+        "parameters": {...} (optional)
     }
     """
     try:
@@ -179,7 +134,16 @@ def batch_analyze():
             return jsonify({'error': 'No images provided'}), 400
         
         method = data.get('method', 'adaptive')
+        params = data.get('parameters', {})
         results = []
+        
+        # Initialize analyzer with custom or default parameters
+        analyzer = CellViabilityAnalyzer(
+            dead_cell_threshold=params.get('dead_cell_threshold', 0.50),
+            min_cell_area=int(params.get('min_cell_area', 300)),
+            max_cell_area=int(params.get('max_cell_area', 15000)),
+            circularity_threshold=params.get('circularity_threshold', 0.25)
+        )
         
         for img_data in data['images']:
             try:
