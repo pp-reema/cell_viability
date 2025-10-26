@@ -17,8 +17,7 @@
 
         // CONFIGURE YOUR BACKEND URL HERE
         const API_URL = 'https://cell-viability.onrender.com'; 
-        // For deployment, change to your Render URL:
-        // const API_URL = 'https://your-app-name.onrender.com';
+        // For deployment: const API_URL = 'https://your-app-name.onrender.com';
 
         const CellViabilityApp = () => {
             const [currentImage, setCurrentImage] = useState(null);
@@ -30,6 +29,15 @@
             const [overlayImage, setOverlayImage] = useState(null);
             const [classificationImage, setClassificationImage] = useState(null);
             const [cameraReady, setCameraReady] = useState(false);
+            const [showSettings, setShowSettings] = useState(false);
+            
+            // Analysis parameters with defaults
+            const [params, setParams] = useState({
+                dead_cell_threshold: 0.50,
+                min_cell_area: 300,
+                max_cell_area: 15000,
+                circularity_threshold: 0.25
+            });
             
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
@@ -38,15 +46,15 @@
 
             const storageAvailable = typeof window !== 'undefined' && window.storage;
 
+            // Real-time sync - poll every 2 seconds
             useEffect(() => {
                 if (storageAvailable) {
                     loadSharedState();
-                    const interval = setInterval(loadSharedState, 3000);
+                    const interval = setInterval(loadSharedState, 2000);
                     return () => clearInterval(interval);
                 }
             }, []);
 
-            // Cleanup camera on unmount
             useEffect(() => {
                 return () => {
                     if (streamRef.current) {
@@ -69,6 +77,11 @@
                             setClassificationImage(data.classificationImage);
                             setLastUpdate(data.timestamp);
                             setConnectedUsers(data.connectedUsers || 1);
+                            
+                            // Update params if changed by another user
+                            if (data.params) {
+                                setParams(data.params);
+                            }
                         }
                     }
                 } catch (error) {
@@ -85,6 +98,7 @@
                         analysisResult: result,
                         overlayImage: overlay,
                         classificationImage: classification,
+                        params: params,
                         timestamp: Date.now(),
                         connectedUsers: connectedUsers + 1
                     };
@@ -114,7 +128,6 @@
                         videoRef.current.srcObject = stream;
                         streamRef.current = stream;
                         
-                        // Wait for video to be ready
                         videoRef.current.onloadedmetadata = () => {
                             videoRef.current.play();
                             setCameraReady(true);
@@ -148,15 +161,12 @@
                 const canvas = canvasRef.current;
                 const video = videoRef.current;
                 
-                // Set canvas dimensions to match video
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 
-                // Draw current video frame to canvas
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                // Convert to image data
                 const imageData = canvas.toDataURL('image/png');
                 setCurrentImage(imageData);
                 stopCamera();
@@ -188,7 +198,8 @@
                         body: JSON.stringify({
                             image: imageData,
                             method: 'adaptive',
-                            include_images: true
+                            include_images: true,
+                            parameters: params
                         })
                     });
 
@@ -229,14 +240,23 @@
             const downloadResults = () => {
                 if (!analysisResult) return;
                 
-                const data = JSON.stringify(analysisResult, null, 2);
-                const blob = new Blob([data], { type: 'application/json' });
+                const data = {
+                    ...analysisResult,
+                    parameters_used: params,
+                    timestamp: new Date().toISOString()
+                };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = `cell-analysis-${Date.now()}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
+            };
+
+            const handleParamChange = (key, value) => {
+                const newParams = { ...params, [key]: parseFloat(value) };
+                setParams(newParams);
             };
 
             return (
@@ -251,12 +271,99 @@
                                     </h1>
                                     <p className="text-gray-600 mt-1">Real-time synchronized analysis across all devices</p>
                                 </div>
-                                {storageAvailable && (
-                                    <div className="flex items-center gap-2 bg-green-100 px-4 py-2 rounded-full">
-                                        <span className="text-green-700 font-semibold">👥 {connectedUsers} Active</span>
-                                    </div>
-                                )}
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={() => setShowSettings(!showSettings)}
+                                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold transition flex items-center gap-2"
+                                    >
+                                        ⚙️ Settings
+                                    </button>
+                                    {storageAvailable && (
+                                        <div className="flex items-center gap-2 bg-green-100 px-4 py-2 rounded-full">
+                                            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                                            <span className="text-green-700 font-semibold">👥 {connectedUsers} Active</span>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
+
+                            {/* Settings Panel */}
+                            {showSettings && (
+                                <div className="mt-6 p-6 bg-gray-50 rounded-lg border-2 border-gray-200">
+                                    <h3 className="text-lg font-bold text-gray-800 mb-4">Analysis Parameters</h3>
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Dead Cell Threshold (0-1)
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={params.dead_cell_threshold}
+                                                onChange={(e) => handleParamChange('dead_cell_threshold', e.target.value)}
+                                                className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">Cells darker than this are considered dead</p>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Minimum Cell Area (pixels)
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="50"
+                                                min="50"
+                                                max="5000"
+                                                value={params.min_cell_area}
+                                                onChange={(e) => handleParamChange('min_cell_area', e.target.value)}
+                                                className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">Minimum size to detect as a cell</p>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Maximum Cell Area (pixels)
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="500"
+                                                min="1000"
+                                                max="50000"
+                                                value={params.max_cell_area}
+                                                onChange={(e) => handleParamChange('max_cell_area', e.target.value)}
+                                                className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">Maximum size to detect as a cell</p>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Circularity Threshold (0-1)
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={params.circularity_threshold}
+                                                onChange={(e) => handleParamChange('circularity_threshold', e.target.value)}
+                                                className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">Minimum circularity (1 = perfect circle)</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                        <p className="text-sm text-blue-800">
+                                            💡 <strong>Tip:</strong> Changes to these parameters will be synced to all connected devices in real-time!
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Camera View */}
@@ -452,26 +559,9 @@
                             </div>
                         )}
 
-                        {/* Instructions */}
-                        <div className="bg-white rounded-lg shadow-lg p-6 mt-6">
-                            <h3 className="text-lg font-bold text-gray-800 mb-3">📖 How to Use</h3>
-                            <ol className="list-decimal list-inside space-y-2 text-gray-700">
-                                <li>Choose to either capture a new image using your camera or upload an existing image</li>
-                                <li>The system will automatically analyze the cells and detect live/dead cells</li>
-                                <li>All connected devices will see the same analysis results in real-time</li>
-                                <li>Download the analysis report as JSON for your records</li>
-                            </ol>
-                            
-                            <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                                <p className="text-sm text-blue-800">
-                                    <strong>⚙️ Backend:</strong> <code className="bg-blue-100 px-2 py-1 rounded">{API_URL}</code>
-                                </p>
-                            </div>
-                        </div>
-
                         {/* Footer */}
                         <div className="text-center text-gray-600 mt-8 pb-4">
-                            <p>Cell Viability Analyzer v1.0</p>
+                            <p className="text-sm">Cell Viability Analyzer v2.0 | Real-time Collaborative Analysis</p>
                         </div>
                     </div>
 
