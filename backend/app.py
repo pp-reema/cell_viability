@@ -10,12 +10,7 @@ import json
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Initialize analyzer
-analyzer = CellViabilityAnalyzer(
-    dead_cell_threshold=0.35,
-    min_cell_area=100,
-    max_cell_area=8000
-)
+# Note: Analyzer is now initialized per request with custom parameters
 
 @app.route('/', methods=['GET'])
 def home():
@@ -34,7 +29,13 @@ def analyze_image():
     Expected JSON format:
     {
         "image": "data:image/png;base64,iVBORw0KG...",
-        "method": "adaptive" (optional, default: "adaptive")
+        "method": "adaptive" (optional, default: "adaptive"),
+        "parameters": {
+            "dead_cell_threshold": 0.50,
+            "min_cell_area": 300,
+            "max_cell_area": 15000,
+            "circularity_threshold": 0.25
+        }
     }
     """
     try:
@@ -48,6 +49,70 @@ def analyze_image():
         image_data = data['image']
         if ',' in image_data:
             image_data = image_data.split(',')[1]
+        
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        image_np = np.array(image)
+        
+        # Get analysis method (default: adaptive)
+        method = data.get('method', 'adaptive')
+        
+        # Get custom parameters if provided
+        params = data.get('parameters', {})
+        
+        # Initialize analyzer with custom or default parameters
+        analyzer = CellViabilityAnalyzer(
+            dead_cell_threshold=params.get('dead_cell_threshold', 0.50),
+            min_cell_area=int(params.get('min_cell_area', 300)),
+            max_cell_area=int(params.get('max_cell_area', 15000)),
+            circularity_threshold=params.get('circularity_threshold', 0.25)
+        )
+        
+        # Run analysis
+        print(f"Analyzing image of shape: {image_np.shape}")
+        print(f"Parameters: {params}")
+        results = analyzer.analyze(image_np, method=method, visualize=False)
+        
+        # Convert numpy arrays to lists for JSON serialization
+        response_data = {
+            'statistics': results['statistics'],
+            'total_cells': len(results['all_cells']),
+            'parameters_used': {
+                'dead_cell_threshold': analyzer.dead_threshold,
+                'min_cell_area': analyzer.min_cell_area,
+                'max_cell_area': analyzer.max_cell_area,
+                'circularity_threshold': analyzer.circularity_threshold
+            },
+            'success': True
+        }
+        
+        # Optionally include overlay and classification images as base64
+        if data.get('include_images', False):
+            # Convert overlay to base64
+            overlay_img = Image.fromarray(results['overlay'])
+            overlay_buffer = io.BytesIO()
+            overlay_img.save(overlay_buffer, format='PNG')
+            overlay_base64 = base64.b64encode(overlay_buffer.getvalue()).decode()
+            response_data['overlay_image'] = f'data:image/png;base64,{overlay_base64}'
+            
+            # Convert classification to base64
+            class_img = Image.fromarray(results['classification'])
+            class_buffer = io.BytesIO()
+            class_img.save(class_buffer, format='PNG')
+            class_base64 = base64.b64encode(class_buffer.getvalue()).decode()
+            response_data['classification_image'] = f'data:image/png;base64,{class_base64}'
+        
+        return jsonify(response_data)
+    
+    except Exception as e:
+        print(f"Error during analysis: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': str(e),
+            'success': False
+        }), 500 image_data.split(',')[1]
         
         # Decode base64 image
         image_bytes = base64.b64decode(image_data)
