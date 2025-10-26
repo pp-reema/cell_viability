@@ -16,10 +16,9 @@
         const { useState, useRef, useEffect } = React;
 
         // CONFIGURE YOUR BACKEND URL HERE
-        const API_URL = 'https://cell-viability.onrender.com/'; 
-        // For deployment, change to:
-        // 'https://cell-viability.onrender.com'
-        // 'https://your-app-name.railway.app'
+        const API_URL = 'https://cell-viability.onrender.com'; 
+        // For deployment, change to your Render URL:
+        // const API_URL = 'https://your-app-name.onrender.com';
 
         const CellViabilityApp = () => {
             const [currentImage, setCurrentImage] = useState(null);
@@ -30,6 +29,7 @@
             const [lastUpdate, setLastUpdate] = useState(null);
             const [overlayImage, setOverlayImage] = useState(null);
             const [classificationImage, setClassificationImage] = useState(null);
+            const [cameraReady, setCameraReady] = useState(false);
             
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
@@ -44,6 +44,15 @@
                     const interval = setInterval(loadSharedState, 3000);
                     return () => clearInterval(interval);
                 }
+            }, []);
+
+            // Cleanup camera on unmount
+            useEffect(() => {
+                return () => {
+                    if (streamRef.current) {
+                        streamRef.current.getTracks().forEach(track => track.stop());
+                    }
+                };
             }, []);
 
             const loadSharedState = async () => {
@@ -88,16 +97,33 @@
 
             const startCamera = async () => {
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ 
-                        video: { facingMode: 'environment' } 
-                    });
+                    setCameraReady(false);
+                    setIsCameraMode(true);
+                    
+                    const constraints = {
+                        video: {
+                            facingMode: 'environment',
+                            width: { ideal: 1920 },
+                            height: { ideal: 1080 }
+                        }
+                    };
+                    
+                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    
                     if (videoRef.current) {
                         videoRef.current.srcObject = stream;
                         streamRef.current = stream;
-                        setIsCameraMode(true);
+                        
+                        // Wait for video to be ready
+                        videoRef.current.onloadedmetadata = () => {
+                            videoRef.current.play();
+                            setCameraReady(true);
+                        };
                     }
                 } catch (error) {
-                    alert('Camera access denied or not available');
+                    console.error('Camera error:', error);
+                    alert('Camera access denied or not available. Please enable camera permissions.');
+                    setIsCameraMode(false);
                 }
             };
 
@@ -106,21 +132,31 @@
                     streamRef.current.getTracks().forEach(track => track.stop());
                     streamRef.current = null;
                 }
+                if (videoRef.current) {
+                    videoRef.current.srcObject = null;
+                }
                 setIsCameraMode(false);
+                setCameraReady(false);
             };
 
             const captureImage = () => {
-                if (!videoRef.current || !canvasRef.current) return;
+                if (!videoRef.current || !canvasRef.current || !cameraReady) {
+                    alert('Camera not ready. Please wait a moment.');
+                    return;
+                }
                 
                 const canvas = canvasRef.current;
                 const video = videoRef.current;
                 
+                // Set canvas dimensions to match video
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 
+                // Draw current video frame to canvas
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(video, 0, 0);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
+                // Convert to image data
                 const imageData = canvas.toDataURL('image/png');
                 setCurrentImage(imageData);
                 stopCamera();
@@ -157,7 +193,8 @@
                     });
 
                     if (!response.ok) {
-                        throw new Error('Analysis failed');
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Analysis failed');
                     }
 
                     const result = await response.json();
@@ -175,7 +212,7 @@
                     
                 } catch (error) {
                     console.error('Analysis error:', error);
-                    alert('Analysis failed. Please check if the backend is running at: ' + API_URL);
+                    alert(`Analysis failed: ${error.message}\n\nPlease check if backend is running at: ${API_URL}`);
                 } finally {
                     setIsAnalyzing(false);
                 }
@@ -205,6 +242,7 @@
             return (
                 <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
                     <div className="max-w-7xl mx-auto">
+                        {/* Header */}
                         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
                             <div className="flex items-center justify-between flex-wrap gap-4">
                                 <div>
@@ -221,33 +259,50 @@
                             </div>
                         </div>
 
+                        {/* Camera View */}
                         {isCameraMode && (
                             <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                                <div className="relative">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4">📷 Camera Preview</h2>
+                                <div className="relative bg-black rounded-lg overflow-hidden" style={{ minHeight: '400px' }}>
+                                    {!cameraReady && (
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <div className="text-center text-white">
+                                                <div className="animate-spin text-6xl mb-4">⚙️</div>
+                                                <p>Starting camera...</p>
+                                            </div>
+                                        </div>
+                                    )}
                                     <video 
                                         ref={videoRef} 
                                         autoPlay 
                                         playsInline
-                                        className="w-full rounded-lg bg-black"
+                                        className="w-full h-auto rounded-lg"
+                                        style={{ display: cameraReady ? 'block' : 'none' }}
                                     />
-                                    <div className="flex gap-4 mt-4">
-                                        <button
-                                            onClick={captureImage}
-                                            className="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition"
-                                        >
-                                            📸 Capture Image
-                                        </button>
-                                        <button
-                                            onClick={stopCamera}
-                                            className="px-6 py-3 bg-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-400 transition"
-                                        >
-                                            Cancel
-                                        </button>
-                                    </div>
+                                </div>
+                                <div className="flex gap-4 mt-4">
+                                    <button
+                                        onClick={captureImage}
+                                        disabled={!cameraReady}
+                                        className={`flex-1 px-6 py-3 rounded-lg font-semibold transition ${
+                                            cameraReady 
+                                                ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                        }`}
+                                    >
+                                        📸 {cameraReady ? 'Capture Image' : 'Waiting for camera...'}
+                                    </button>
+                                    <button
+                                        onClick={stopCamera}
+                                        className="px-6 py-3 bg-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-400 transition"
+                                    >
+                                        Cancel
+                                    </button>
                                 </div>
                             </div>
                         )}
 
+                        {/* Upload/Capture Options */}
                         {!isCameraMode && !currentImage && (
                             <div className="grid md:grid-cols-2 gap-4 mb-6">
                                 <button
@@ -281,6 +336,7 @@
                             </div>
                         )}
 
+                        {/* Analysis Display */}
                         {currentImage && (
                             <div className="space-y-6">
                                 <div className="bg-white rounded-lg shadow-lg p-6">
@@ -308,6 +364,7 @@
                                             <div className="flex flex-col items-center justify-center h-64 gap-4">
                                                 <div className="animate-spin text-6xl">⚙️</div>
                                                 <p className="text-gray-600">Analyzing cells...</p>
+                                                <p className="text-sm text-gray-500">This may take 30-60 seconds on first request</p>
                                             </div>
                                         ) : analysisResult ? (
                                             <div className="space-y-4">
@@ -395,6 +452,7 @@
                             </div>
                         )}
 
+                        {/* Instructions */}
                         <div className="bg-white rounded-lg shadow-lg p-6 mt-6">
                             <h3 className="text-lg font-bold text-gray-800 mb-3">📖 How to Use</h3>
                             <ol className="list-decimal list-inside space-y-2 text-gray-700">
@@ -411,6 +469,7 @@
                             </div>
                         </div>
 
+                        {/* Footer */}
                         <div className="text-center text-gray-600 mt-8 pb-4">
                             <p>Cell Viability Analyzer v1.0</p>
                         </div>
